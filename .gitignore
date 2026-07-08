@@ -1,0 +1,41 @@
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+
+# ── Environment & Secrets (NEVER commit these) ────────────────
+.env
+*.env
+.env.local
+.env.production
+
+# ── Database (contains user data) ────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+disksense.db
+
+# ── Flask / Python runtime ────────────────────────────────────
+instance/
+.webassets-cache
+venv/
+.venv/
+env/
+ENV/
+
+# ── OS files ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo

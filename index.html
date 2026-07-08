@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DiskSense AI — Hard Disk Analyzer</title>
+  <meta name="description" content="AI-powered hard disk health analyzer with SMART data insights, risk prediction, partition management, and intelligent recommendations." />
+  <meta name="theme-color" content="#07070f" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* ── Auth user badge in header ──────────────────────────────── */
+    #userBadge {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px 4px 4px;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      cursor: default;
+      transition: var(--transition);
+    }
+    #userBadge:hover { background: var(--bg-card-hover); border-color: rgba(255,255,255,0.12); }
+    #userAvatar {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    #userAvatarFallback {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    #userName {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      max-width: 120px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #userProvider {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    #userProvider.google { background: rgba(66,133,244,0.15); color: #4285f4; }
+    #userProvider.github { background: rgba(255,255,255,0.08); color: var(--text-secondary); }
+    #logoutBtn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color 0.2s;
+      line-height: 1;
+    }
+    #logoutBtn:hover { color: var(--danger); }
+    /* Admin Users panel */
+    #adminUsersPanel {
+      display: none;
+      position: fixed;
+      top: 74px; right: 16px;
+      width: 340px;
+      max-height: 60vh;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.6);
+      z-index: 500;
+      overflow: hidden;
+      flex-direction: column;
+    }
+    #adminUsersPanel.open { display: flex; animation: fadeSlideIn 0.2s ease; }
+    .admin-panel-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .admin-close-btn {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 16px; padding: 2px;
+    }
+    .admin-close-btn:hover { color: var(--text-primary); }
+    .admin-users-list { overflow-y: auto; flex: 1; padding: 8px; }
+    .admin-user-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-radius: 8px;
+      transition: background 0.15s;
+    }
+    .admin-user-row:hover { background: var(--bg-card); }
+    .admin-user-avatar {
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .admin-user-info { flex: 1; min-width: 0; }
+    .admin-user-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .admin-user-meta { font-size: 11px; color: var(--text-muted); }
+    .admin-user-stats { text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+    .admin-stats-bar {
+      display: grid;
+      grid-template-columns: repeat(3,1fr);
+      gap: 0;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .admin-stat-item {
+      padding: 10px;
+      text-align: center;
+      border-right: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .admin-stat-item:last-child { border-right: none; }
+    .admin-stat-val { font-size: 16px; font-weight: 800; color: var(--accent); display: block; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══════════════════════════════ HEADER ═══════════════════════════════ -->
+  <header id="header">
+    <a class="header-logo" href="#" aria-label="DiskSense AI Home">
+      <div class="logo-icon">💽</div>
+      <span class="logo-text">DiskSense AI</span>
+    </a>
+    <div class="header-divider"></div>
+    <span class="header-subtitle">Hard Disk Analyzer</span>
+    <div class="header-spacer"></div>
+
+    <div class="drive-selector" id="driveSelector" role="group" aria-label="Select drive"></div>
+
+    <div class="header-divider"></div>
+
+    <div class="header-status">
+      <div class="status-dot" role="status" aria-label="System monitoring active"></div>
+      <span id="headerStatusText">Monitoring Active</span>
+    </div>
+
+    <button class="btn-icon" id="refreshBtn" data-tip="Refresh Data" aria-label="Refresh disk data">🔄</button>
+    <button class="btn-icon" id="reportBtn" data-tip="Download Report" aria-label="Download health report">📥</button>
+    <button class="btn-icon" id="adminBtn" data-tip="Manage Users" aria-label="View logged-in users">👥</button>
+
+    <div class="header-divider"></div>
+
+    <!-- Logged-in user badge -->
+    <div id="userBadge" role="status" aria-label="Logged in user">
+      <img id="userAvatar" src="" alt="" />
+      <div id="userAvatarFallback" style="display:none;"></div>
+      <span id="userName"></span>
+      <span id="userProvider" class=""></span>
+      <button id="logoutBtn" title="Sign out" aria-label="Sign out">⏻</button>
+    </div>
+  </header>
+
+  <!-- Admin Users Panel -->
+  <div id="adminUsersPanel" role="dialog" aria-label="Users panel" aria-modal="true">
+    <div class="admin-panel-header">
+      <span>👥 Logged-In Users</span>
+      <button class="admin-close-btn" id="adminCloseBtn" aria-label="Close users panel">✕</button>
+    </div>
+    <div class="admin-stats-bar" id="adminStatsBar"></div>
+    <div class="admin-users-list" id="adminUsersList"></div>
+  </div>
+
+  <!-- ═══════════════════════════════ SIDEBAR ══════════════════════════════ -->
+  <nav id="sidebar" aria-label="Main navigation">
+    <span class="nav-section-label">Overview</span>
+
+    <a class="nav-item active" id="nav-dashboard" href="#" data-page="dashboard" role="tab" aria-selected="true">
+      <span class="nav-icon">📊</span>
+      <span>Dashboard</span>
+    </a>
+
+    <a class="nav-item" id="nav-health" href="#" data-page="health" role="tab" aria-selected="false">
+      <span class="nav-icon">❤️</span>
+      <span>Disk Health</span>
+      <span class="nav-badge ok" id="navHealthBadge">OK</span>
+    </a>
+
+    <span class="nav-section-label">Analysis</span>
+
+    <a class="nav-item" id="nav-smart" href="#" data-page="smart" role="tab" aria-selected="false">
+      <span class="nav-icon">🔬</span>
+      <span>SMART Data</span>
+    </a>
+
+    <a class="nav-item" id="nav-partitions" href="#" data-page="partitions" role="tab" aria-selected="false">
+      <span class="nav-icon">🗂️</span>
+      <span>Partitions</span>
+    </a>
+
+    <a class="nav-item" id="nav-temperature" href="#" data-page="temperature" role="tab" aria-selected="false">
+      <span class="nav-icon">🌡️</span>
+      <span>Temperature</span>
+    </a>
+
+    <span class="nav-section-label">Tools</span>
+
+    <a class="nav-item" id="nav-optimizer" href="#" data-page="optimizer" role="tab" aria-selected="false">
+      <span class="nav-icon">⚡</span>
+      <span>Optimizer</span>
+    </a>
+
+    <div class="sidebar-footer">
+      <div class="disk-quick-info" id="sidebarDiskInfo">
+        <div class="disk-quick-label">Storage</div>
+        <div class="disk-quick-bar-wrap">
+          <div class="disk-quick-bar">
+            <div class="disk-quick-bar-fill" id="sidebarStorageBar" style="width:0%"></div>
+          </div>
+          <span class="disk-quick-val" id="sidebarStorageVal">—</span>
+        </div>
+        <div class="disk-quick-bar-wrap">
+          <div class="disk-quick-bar">
+            <div class="disk-quick-bar-fill" id="sidebarHealthBar" style="width:0%"></div>
+          </div>
+          <span class="disk-quick-val" id="sidebarHealthVal">—</span>
+        </div>
+        <div class="disk-quick-label" style="margin-top:6px;" id="sidebarDiskLabel">—</div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════ MAIN CONTENT ══════════════════════════ -->
+  <main id="main" role="main">
+
+    <!-- ─── DASHBOARD PAGE ───────────────────────────────────────────────── -->
+    <section class="page active" id="page-dashboard">
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle" id="dashSubtitle">Loading disk data...</p>
+        </div>
+        <button class="btn btn-primary" id="dashAiBtn">
+          <span>🤖</span> Ask AI Assistant
+        </button>
+      </div>
+
+      <!-- Alert Banner (conditionally shown) -->
+      <div id="dashAlert" style="display:none;"></div>
+
+      <!-- Stats Grid -->
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card accent">
+          <div class="stat-icon accent">💾</div>
+          <div>
+            <div class="stat-label">Total Capacity</div>
+            <div class="stat-value accent" id="statCapacity">—</div>
+            <div class="stat-sub" id="statFree">— free</div>
+          </div>
+        </div>
+        <div class="stat-card success">
+          <div class="stat-icon success">❤️</div>
+          <div>
+            <div class="stat-label">Health Score</div>
+            <div class="stat-value success" id="statHealth">—</div>
+            <div class="stat-sub" id="statHealthStatus">—</div>
+          </div>
+        </div>
+        <div class="stat-card warning" id="statTempCard">
+          <div class="stat-icon warning">🌡️</div>
+          <div>
+            <div class="stat-label">Temperature</div>
+            <div class="stat-value warning" id="statTemp">—</div>
+            <div class="stat-sub" id="statTempStatus">—</div>
+          </div>
+        </div>
+        <div class="stat-card purple">
+          <div class="stat-icon purple">⚡</div>
+          <div>
+            <div class="stat-label">Power On Hours</div>
+            <div class="stat-value purple" id="statPOH">—</div>
+            <div class="stat-sub" id="statPOHSub">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Health Overview + Details -->
+      <div class="section-grid-2">
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">❤️</span> Health Overview</div>
+          <div class="health-overview">
+            <div class="health-ring-wrap">
+              <svg width="140" height="140" viewBox="0 0 140 140" aria-hidden="true">
+                <circle class="ring-track" cx="70" cy="70" r="60"/>
+                <circle class="ring-fill" id="healthRingFill" cx="70" cy="70" r="60"/>
+              </svg>
+              <div class="ring-center">
+                <span class="ring-score" id="ringScore">—</span>
+                <span class="ring-label">Health</span>
+              </div>
+            </div>
+            <div class="info-grid" id="healthInfoGrid">
+              <div class="info-item">
+                <div class="info-item-label">Drive Type</div>
+                <div class="info-item-value" id="infoDriveType">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-item-label">Interface</div>
+                <div class="info-item-value" id="infoInterface">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-item-label">Model</div>
+                <div class="info-item-value" id="infoModel" style="font-size:11px;">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-item-label">Firmware</div>
+                <div class="info-item-value" id="infoFirmware">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-item-label">Serial No.</div>
+                <div class="info-item-value" id="infoSerial" style="font-size:11px;">—</div>
+              </div>
+              <div class="info-item">
+                <div class="info-item-label">SMART Status</div>
+                <div class="info-item-value" id="infoSmartStatus">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">📈</span> Storage Usage</div>
+          <div id="storageBreakdown"></div>
+        </div>
+      </div>
+
+      <!-- Recent Events -->
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">📋</span> Recent Events</div>
+        <div id="recentEvents"></div>
+      </div>
+    </section>
+
+    <!-- ─── DISK HEALTH PAGE ──────────────────────────────────────────────── -->
+    <section class="page" id="page-health">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Disk Health</h2>
+          <p class="page-subtitle">Comprehensive health analysis and risk assessment</p>
+        </div>
+        <button class="btn btn-secondary" id="healthReportBtn">📄 Generate Report</button>
+      </div>
+
+      <div id="healthAlerts"></div>
+
+      <div class="section-grid-2">
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">🎯</span> Risk Assessment</div>
+          <div id="riskAssessment"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">💡</span> AI Recommendations</div>
+          <div id="aiRecommendations" style="font-size:13px; color: var(--text-secondary); line-height:1.7;"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">📊</span> Health Metrics Breakdown</div>
+        <div id="healthMetricsGrid" class="section-grid-3" style="gap:12px;"></div>
+      </div>
+    </section>
+
+    <!-- ─── SMART DATA PAGE ───────────────────────────────────────────────── -->
+    <section class="page" id="page-smart">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">SMART Data</h2>
+          <p class="page-subtitle">Self-Monitoring, Analysis and Reporting Technology attributes</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary" id="smartRefreshBtn">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">🔬</span> SMART Attributes</div>
+        <div class="smart-table-wrap">
+          <table class="smart-table" role="table" aria-label="SMART attributes">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Attribute</th>
+                <th>Value</th>
+                <th>Worst</th>
+                <th>Threshold</th>
+                <th>Raw Value</th>
+                <th>Trend</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="smartTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-grid-2">
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">📖</span> Attribute Glossary</div>
+          <div id="smartGlossary" style="font-size:12px; line-height:1.8; color:var(--text-secondary);"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">⚠️</span> Key Flags to Watch</div>
+          <div id="smartFlags" style="font-size:12px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── PARTITIONS PAGE ───────────────────────────────────────────────── -->
+    <section class="page" id="page-partitions">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Partitions</h2>
+          <p class="page-subtitle">Storage layout, filesystem info, and management guidance</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">🗺️</span> Disk Layout</div>
+        <div class="partition-bar-wrap" id="partitionBar"></div>
+        <div class="partitions-list" id="partitionsList"></div>
+      </div>
+
+      <div class="section-grid-2">
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">🛡️</span> Safe Practices</div>
+          <div id="partitionSafePractices" style="font-size:13px; color:var(--text-secondary); line-height:1.8;"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">🔧</span> Defrag / TRIM Guide</div>
+          <div id="defragTrimGuide" style="font-size:13px; color:var(--text-secondary); line-height:1.8;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── TEMPERATURE PAGE ──────────────────────────────────────────────── -->
+    <section class="page" id="page-temperature">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Temperature</h2>
+          <p class="page-subtitle">30-day thermal history and safe operating ranges</p>
+        </div>
+      </div>
+
+      <div class="stats-grid" style="grid-template-columns: repeat(3,1fr);">
+        <div class="stat-card accent">
+          <div class="stat-icon accent">🌡️</div>
+          <div>
+            <div class="stat-label">Current Temp</div>
+            <div class="stat-value" id="tempCurrent" style="color:var(--accent)">—</div>
+          </div>
+        </div>
+        <div class="stat-card success">
+          <div class="stat-icon success">❄️</div>
+          <div>
+            <div class="stat-label">Min (30-day)</div>
+            <div class="stat-value success" id="tempMin">—</div>
+          </div>
+        </div>
+        <div class="stat-card warning">
+          <div class="stat-icon warning">🔥</div>
+          <div>
+            <div class="stat-label">Max (30-day)</div>
+            <div class="stat-value warning" id="tempMax">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">📈</span> 30-Day Temperature History</div>
+        <div class="temp-chart-wrap">
+          <canvas id="tempChart" height="120" aria-label="Temperature history chart"></canvas>
+        </div>
+        <div class="temp-legend">
+          <span class="temp-legend-dot" style="background:var(--accent)"></span> Temperature (°C)
+          <span class="temp-legend-dot" style="background:var(--danger); margin-left:8px;"></span> Safe Limit (55°C)
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">💡</span> Temperature Guidance</div>
+        <div id="tempGuidance" style="font-size:13px; color:var(--text-secondary); line-height:1.8;"></div>
+      </div>
+    </section>
+
+    <!-- ─── OPTIMIZER PAGE ───────────────────────────────────────────────── -->
+    <section class="page" id="page-optimizer">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Optimizer</h2>
+          <p class="page-subtitle">AI-guided maintenance recommendations for peak performance</p>
+        </div>
+      </div>
+
+      <div id="optimizerContent"></div>
+    </section>
+
+  </main>
+
+  <!-- ═══════════════════════════════ AI PANEL ═════════════════════════════ -->
+  <aside id="ai-panel" role="complementary" aria-label="AI Assistant">
+    <div class="ai-panel-header">
+      <div class="ai-avatar" role="img" aria-label="AI Assistant">🤖</div>
+      <div>
+        <div class="ai-panel-title">DiskSense AI</div>
+        <div class="ai-panel-model">Disk Health Intelligence Engine</div>
+      </div>
+      <div class="ai-online-badge">● ONLINE</div>
+    </div>
+
+    <div class="ai-quick-prompts">
+      <div class="ai-quick-label">Quick Analysis</div>
+      <div class="quick-prompts-grid">
+        <button class="quick-btn" id="qb-health" data-prompt="explain-health">
+          <span class="qb-icon">🔍</span> Explain Health
+        </button>
+        <button class="quick-btn" id="qb-risks" data-prompt="predict-risks">
+          <span class="qb-icon">⚠️</span> Predict Risks
+        </button>
+        <button class="quick-btn" id="qb-backup" data-prompt="backup-freq">
+          <span class="qb-icon">💾</span> Backup Advice
+        </button>
+        <button class="quick-btn" id="qb-partition" data-prompt="partition-mgmt">
+          <span class="qb-icon">🗂️</span> Partition Tips
+        </button>
+        <button class="quick-btn" id="qb-defrag" data-prompt="defrag-trim">
+          <span class="qb-icon">🔧</span> Defrag / TRIM
+        </button>
+        <button class="quick-btn" id="qb-report" data-prompt="full-report">
+          <span class="qb-icon">📊</span> Full Report
+        </button>
+      </div>
+    </div>
+
+    <div class="ai-chat-messages" id="aiChatMessages" role="log" aria-live="polite" aria-label="AI conversation"></div>
+
+    <div class="ai-chat-input-wrap">
+      <div class="ai-chat-input-box">
+        <textarea
+          id="chatInput"
+          rows="1"
+          placeholder="Ask about your disk health..."
+          aria-label="Type your question"
+          maxlength="500"
+        ></textarea>
+        <button id="chatSendBtn" aria-label="Send message">➤</button>
+      </div>
+      <div class="input-hint">Press Enter to send · Shift+Enter for new line</div>
+    </div>
+  </aside>
+
+</div><!-- /#app -->
+
+<script>
+/* ================================================================
+   Auth Guard + User Info — fetches /api/me on load.
+   If the server returns 401/redirect, sends user to /login.
+   If running without Flask (file://), silently skips auth.
+   ================================================================ */
+(async function initAuth() {
+  // Skip auth guard when opened as a local file (no Flask backend)
+  if (window.location.protocol === 'file:') return;
+
+  try {
+    const res = await fetch('/api/me', { credentials: 'include' });
+    if (res.status === 401 || res.redirected) {
+      window.location.href = '/login';
+      return;
+    }
+    if (!res.ok) return;
+
+    const user = await res.json();
+    renderUserBadge(user);
+  } catch (e) {
+    // Network error — Flask not running, silently skip
+    console.warn('[DiskSense] Auth check skipped (backend not available)');
+  }
+})();
+
+function renderUserBadge(user) {
+  const badge    = document.getElementById('userBadge');
+  const avatar   = document.getElementById('userAvatar');
+  const fallback = document.getElementById('userAvatarFallback');
+  const nameEl   = document.getElementById('userName');
+  const provEl   = document.getElementById('userProvider');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  nameEl.textContent = user.name || user.email || 'User';
+  provEl.textContent = user.provider === 'google' ? 'G' : user.provider === 'github' ? 'GH' : user.provider;
+  provEl.className   = user.provider;
+
+  if (user.avatar_url) {
+    avatar.src = user.avatar_url;
+    avatar.style.display = 'block';
+    fallback.style.display = 'none';
+    avatar.onerror = () => {
+      avatar.style.display = 'none';
+      fallback.style.display = 'flex';
+      fallback.textContent = (user.name || 'U')[0].toUpperCase();
+    };
+  } else {
+    avatar.style.display = 'none';
+    fallback.style.display = 'flex';
+    fallback.textContent = (user.name || 'U')[0].toUpperCase();
+  }
+
+  badge.style.display = 'flex';
+
+  logoutBtn.addEventListener('click', () => {
+    window.location.href = '/auth/logout';
+  });
+}
+
+/* ── Admin Users Panel ──────────────────────────────────────────── */
+const adminBtn   = document.getElementById('adminBtn');
+const adminPanel = document.getElementById('adminUsersPanel');
+const adminClose = document.getElementById('adminCloseBtn');
+
+adminBtn && adminBtn.addEventListener('click', async () => {
+  if (window.location.protocol === 'file:') {
+    alert('Admin panel requires the Flask backend to be running.');
+    return;
+  }
+  if (adminPanel.classList.contains('open')) {
+    adminPanel.classList.remove('open');
+    return;
+  }
+  try {
+    const [usersRes, statsRes] = await Promise.all([
+      fetch('/api/users', { credentials: 'include' }),
+      fetch('/api/stats', { credentials: 'include' }),
+    ]);
+    const { users }  = await usersRes.json();
+    const stats      = await statsRes.json();
+
+    // Stats bar
+    document.getElementById('adminStatsBar').innerHTML = `
+      <div class="admin-stat-item"><span class="admin-stat-val">${stats.total_users}</span>Total</div>
+      <div class="admin-stat-item"><span class="admin-stat-val" style="color:#4285f4">${stats.google_users}</span>Google</div>
+      <div class="admin-stat-item"><span class="admin-stat-val" style="color:var(--text-primary)">${stats.github_users}</span>GitHub</div>
+    `;
+
+    // Users list
+    const list = document.getElementById('adminUsersList');
+    if (!users.length) {
+      list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">No users yet</div>';
+    } else {
+      list.innerHTML = users.map(u => {
+        const initials = (u.name || u.email || 'U')[0].toUpperCase();
+        const lastLogin = u.last_login ? new Date(u.last_login).toLocaleDateString() : '—';
+        const provBadge = u.provider === 'google'
+          ? '<span style="color:#4285f4;font-size:10px;font-weight:700;">G</span>'
+          : '<span style="color:var(--text-secondary);font-size:10px;font-weight:700;">GH</span>';
+        return `
+          <div class="admin-user-row">
+            ${u.avatar_url
+              ? `<img class="admin-user-avatar" src="${u.avatar_url}" alt="${u.name}" onerror="this.style.display='none'"/>`
+              : `<div class="admin-user-avatar" style="background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;">${initials}</div>`
+            }
+            <div class="admin-user-info">
+              <div class="admin-user-name">${u.name || u.email || 'Unknown'}</div>
+              <div class="admin-user-meta">${u.email || ''} ${provBadge}</div>
+            </div>
+            <div class="admin-user-stats">
+              <div style="font-weight:700;color:var(--accent);">${u.login_count}×</div>
+              <div>${lastLogin}</div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    adminPanel.classList.add('open');
+  } catch (e) {
+    console.error('Admin panel error:', e);
+  }
+});
+
+adminClose && adminClose.addEventListener('click', () => {
+  adminPanel.classList.remove('open');
+});
+
+// Close panel on outside click
+document.addEventListener('click', (e) => {
+  if (adminPanel && adminPanel.classList.contains('open') &&
+      !adminPanel.contains(e.target) && e.target !== adminBtn) {
+    adminPanel.classList.remove('open');
+  }
+});
+</script>
+
+<script src="app_v2.js"></script>
+</body>
+</html>
