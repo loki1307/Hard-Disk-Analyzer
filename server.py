@@ -5,18 +5,22 @@
 # ================================================================
 
 import os
+import ssl
 import secrets
+import pathlib
 from datetime import datetime, timezone
 from functools import wraps
 
 from flask import (
     Flask, redirect, url_for, session, jsonify,
-    send_from_directory, request, abort
+    send_from_directory, request, abort, make_response
 )
 from flask_login import (
     LoginManager, login_user, logout_user,
     current_user, login_required
 )
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
 
@@ -24,6 +28,7 @@ from models import db, User, LoginEvent
 
 # ── Load environment variables ───────────────────────────────────────
 load_dotenv()
+
 
 # ── App factory ──────────────────────────────────────────────────────
 def create_app():
@@ -34,18 +39,40 @@ def create_app():
     )
 
     # Core config
+    is_production  = os.environ.get("FLASK_ENV") == "production"
+    has_local_cert = pathlib.Path("cert.pem").exists() and pathlib.Path("key.pem").exists()
+
     app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
         "DATABASE_URL", "sqlite:///disksense.db"
     )
+    # Fix Railway/Render PostgreSQL URL prefix (they use postgres:// not postgresql://)
+    db_url = app.config["SQLALCHEMY_DATABASE_URI"]
+    if db_url.startswith("postgres://"):
+        app.config["SQLALCHEMY_DATABASE_URI"] = db_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+    # ── Secure session cookie settings ───────────────────────────────
+    use_https = has_local_cert or is_production   # prod platforms handle TLS upstream
+    app.config["SESSION_COOKIE_HTTPONLY"]  = True
+    app.config["SESSION_COOKIE_SECURE"]   = is_production or use_https
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["PERMANENT_SESSION_LIFETIME"] = 3600 * 8  # 8 hours
 
     # ── Database ─────────────────────────────────────────────────────
     db.init_app(app)
     with app.app_context():
         db.create_all()
+
+    # ── Rate Limiter ──────────────────────────────────────────────────
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["200 per minute"],
+        storage_uri="memory://",
+    )
+    # Stricter limits on auth endpoints
+    limiter.limit("10 per minute")(lambda: None)  # applied per-route below
 
     # ── Flask-Login ──────────────────────────────────────────────────
     login_manager = LoginManager(app)
@@ -57,7 +84,37 @@ def create_app():
 
     @login_manager.unauthorized_handler
     def unauthorized():
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Authentication required"}), 401
         return redirect(url_for("login_page"))
+
+    # ── Security Headers (applied to every response) ──────────────────
+    @app.after_request
+    def add_security_headers(response):
+        # Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+        # Block MIME sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # XSS protection (legacy browsers)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # Referrer policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Permissions policy
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # HSTS — force HTTPS for 1 year (only when running with cert)
+        if use_https:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Content Security Policy
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https://avatars.githubusercontent.com https://lh3.googleusercontent.com; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+        return response
 
     # ── Authlib OAuth clients ────────────────────────────────────────
     oauth = OAuth(app)
@@ -364,19 +421,39 @@ def create_app():
     return app
 
 
-# ── Entry point ───────────────────────────────────────────────────────
+
+# ── Module-level instance for gunicorn ──────────────────────────────────
+# gunicorn imports this module and looks for `application`
+application = create_app()
+
+# ── Entry point (local dev only) ───────────────────────────────────────
 if __name__ == "__main__":
-    application = create_app()
-    sep = "=" * 58
+    # Auto-detect SSL certificate
+    cert = pathlib.Path("cert.pem")
+    key  = pathlib.Path("key.pem")
+    use_ssl = cert.exists() and key.exists()
+
+    port     = int(os.environ.get("PORT", 5000))
+    protocol = "https" if use_ssl else "http"
+    sep      = "=" * 60
     print("\n" + sep)
-    print("  [*]  DiskSense AI -- Backend Server")
-    print("  [>]  http://localhost:5000")
+    print("  [*]  DiskSense AI -- Secure Backend Server")
+    print(f"  [>]  {protocol}://localhost:{port}")
+    print(f"  [>]  {protocol}://10.167.195.133:{port}")
     print("  [#]  Google + GitHub OAuth enabled")
     print("  [DB] SQLite database: disksense.db")
+    print(f"  [SSL] HTTPS {'ENABLED (cert.pem)' if use_ssl else 'DISABLED (no cert found)'}")
     print(sep + "\n")
+
+    ssl_context = None
+    if use_ssl:
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(certfile=str(cert), keyfile=str(key))
+        ssl_context = ssl_ctx
+
     application.run(
         host="0.0.0.0",
-        port=5000,
-        debug=os.environ.get("FLASK_ENV") == "development"
+        port=port,
+        debug=os.environ.get("FLASK_ENV") == "development",
+        ssl_context=ssl_context,
     )
-

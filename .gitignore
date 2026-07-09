@@ -15,6 +15,13 @@ build/
 .env.local
 .env.production
 
+# ── SSL Certificates (private keys must stay local) ───────────
+cert.pem
+key.pem
+*.pem
+*.key
+
+
 # ── Database (contains user data) ────────────────────────────
 *.db
 *.sqlite
