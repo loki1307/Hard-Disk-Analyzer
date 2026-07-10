@@ -8,4 +8,5 @@ gunicorn==26.0.0
 psycopg2-binary==2.9.12
 pyOpenSSL==26.3.0
 python-dotenv==1.2.2
+requests==2.32.3
 SQLAlchemy==2.0.51
